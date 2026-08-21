@@ -549,8 +549,10 @@ function initGraph(data) {
             .attr('cursor', 'pointer')
             .attr('data-layer', layer)
             .attr('data-id', node.id)
-            .attr('data-center', isCenter ? 'true' : 'false');
+            .attr('data-center', isCenter ? 'true' : 'false')
+            .attr('data-original-r', radius);
 
+        // Подпись — теперь только белый текст, без чёрного дубляжа
         const label = labelGroup.append('text')
             .attr('x', node.x)
             .attr('y', node.y - radius - 14)
@@ -561,18 +563,6 @@ function initGraph(data) {
             .attr('font-weight', isCenter ? 'bold' : '500')
             .attr('pointer-events', 'none')
             .text(node.id);
-
-        const text = label;
-        const content = text.text();
-        text.text('');
-        text.append('tspan')
-            .attr('stroke', '#0a0c10')
-            .attr('stroke-width', 3)
-            .attr('stroke-linejoin', 'round')
-            .text(content);
-        text.append('tspan')
-            .attr('fill', '#cfd8dc')
-            .text(content);
 
         // ============================================================
         // ЛОГИКА КЛИКА: 1 раз → соседи, 2 раза → все связи, 3 раза → сброс
