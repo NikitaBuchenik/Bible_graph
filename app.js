@@ -26,7 +26,7 @@ async function init() {
             <p style="color:#ef5350;">Ошибка</p>
             <p style="font-size:13px;color:#78909c;">${err.message}</p>
             <p style="font-size:13px;color:#78909c;margin-top:8px;">
-                Нужны файлы: bible_graph_full.json и rst.json
+                Нужны файлы: bible_gece_graph.json и rst.json
             </p>
         `;
         console.error(err);
@@ -37,16 +37,13 @@ function onNodeClick(id) {
     if (selectedNodeId === id) {
         clickCount++;
         if (clickCount === 1) {
-            // Второй клик - все достижимые
             highlightNode(id, Infinity);
         } else if (clickCount >= 2) {
-            // Третий клик - сброс
             clearHighlight();
             closeVerseInfo();
             clickCount = 0;
         }
     } else {
-        // Новый узел - первый клик
         selectedNodeId = id;
         clickCount = 0;
         highlightNode(id, 1);
@@ -59,9 +56,9 @@ function onVerseSelected(ref) {
         selectedNodeId = ref;
         clickCount = 0;
         highlightNode(ref, 1);
+        focusNode(ref);
     }
     showVerseInfo(ref, onRelatedClick);
-    focusNode(ref);
 }
 
 function onRelatedClick(ref) {
@@ -69,22 +66,17 @@ function onRelatedClick(ref) {
         selectedNodeId = ref;
         clickCount = 0;
         highlightNode(ref, 1);
+        focusNode(ref);
     }
     showVerseInfo(ref, onRelatedClick);
-    focusNode(ref);
 }
 
-// Новая функция для обработки результатов поиска
 function onSearchResults(refs) {
     if (!refs || refs.length === 0) return;
     
-    // Сбрасываем текущую подсветку
     clearHighlight();
-    
-    // Подсвечиваем найденные стихи
     highlightSearchResults(refs);
     
-    // Находим центр масс найденных узлов для фокуса
     let sumX = 0, sumY = 0, count = 0;
     for (const ref of refs) {
         const node = allNodes.find(n => n.id === ref);
@@ -98,14 +90,10 @@ function onSearchResults(refs) {
     if (count > 0) {
         const centerX = sumX / count;
         const centerY = sumY / count;
-        
-        // Создаем виртуальный узел для фокуса
-        const virtualNode = { x: centerX, y: centerY };
-        focusOnPoint(virtualNode);
+        focusOnPoint({ x: centerX, y: centerY });
     }
 }
 
-// Добавляем функцию фокуса на точку
 function focusOnPoint(point) {
     if (!point || !svg || !zoom) return;
 
@@ -127,5 +115,4 @@ function focusOnPoint(point) {
         });
 }
 
-// Запуск
 init();
