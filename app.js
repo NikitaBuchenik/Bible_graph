@@ -21,6 +21,28 @@ async function init() {
             clearHighlight();
         });
 
+        // Логика для ушка статистики
+        const statsToggle = document.getElementById('statsToggle');
+        const statsPanel = document.getElementById('statsPanel');
+        let isOpen = false;
+
+        statsToggle.addEventListener('click', () => {
+            isOpen = !isOpen;
+            statsPanel.classList.toggle('open', isOpen);
+            statsToggle.textContent = isOpen ? '✕' : '📊';
+        });
+
+        // Закрытие по клику вне панели
+        document.addEventListener('click', (e) => {
+            if (isOpen && 
+                !statsPanel.contains(e.target) && 
+                e.target !== statsToggle) {
+                isOpen = false;
+                statsPanel.classList.remove('open');
+                statsToggle.textContent = '📊';
+            }
+        });
+
     } catch (err) {
         loading.innerHTML = `
             <p style="color:#ef5350;">Ошибка</p>

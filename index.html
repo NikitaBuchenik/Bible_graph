@@ -19,6 +19,56 @@
     <div id="tooltip"></div>
     <div id="clearBtn" class="hidden">✕ Сброс</div>
 
+    <!-- Ушко статистики -->
+    <div id="statsToggle">📊</div>
+
+    <!-- Панель статистики (выезжает справа) -->
+    <div id="statsPanel">
+        <div id="statsPanelContent">
+            <h3>Статистика графа</h3>
+            <div class="stat-item">
+                <span class="stat-label">Всего стихов</span>
+                <span class="stat-value">31161</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Со связями</span>
+                <span class="stat-value">19614</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Без связей</span>
+                <span class="stat-value">11547</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Всего связей</span>
+                <span class="stat-value">54524</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Среднее ссылок на стих</span>
+                <span class="stat-value">1.75</span>
+            </div>
+            <div class="stat-section">
+                <div class="stat-section-title">Самый цитируемый стих</div>
+                <div class="top-item">
+                    <span class="ref">Пс 77:10</span>
+                    <span class="count">209 ссылок</span>
+                </div>
+            </div>
+            <div class="stat-section">
+                <div class="stat-section-title">Топ-10 по ссылкам</div>
+                <div class="top-item"><span>1. <span class="ref">Пс 77:10</span></span><span class="count">209 ссылок</span></div>
+                <div class="top-item"><span>2. <span class="ref">Мк 16:1</span></span><span class="count">90 ссылок</span></div>
+                <div class="top-item"><span>3. <span class="ref">Мф 28:1</span></span><span class="count">89 ссылок</span></div>
+                <div class="top-item"><span>4. <span class="ref">Дан 9:11</span></span><span class="count">82 ссылок</span></div>
+                <div class="top-item"><span>5. <span class="ref">2Пар 34:24</span></span><span class="count">80 ссылок</span></div>
+                <div class="top-item"><span>6. <span class="ref">Ин 13:1</span></span><span class="count">67 ссылок</span></div>
+                <div class="top-item"><span>7. <span class="ref">Ин 20:1</span></span><span class="count">67 ссылок</span></div>
+                <div class="top-item"><span>8. <span class="ref">Мк 15:24</span></span><span class="count">63 ссылок</span></div>
+                <div class="top-item"><span>9. <span class="ref">Ин 19:16</span></span><span class="count">57 ссылок</span></div>
+                <div class="top-item"><span>10. <span class="ref">Лк 3:34</span></span><span class="count">56 ссылок</span></div>
+            </div>
+        </div>
+    </div>
+
     <div id="searchPanel">
         <input type="text" id="searchInput" placeholder="Поиск стиха (напр. Ин 3:16)" autocomplete="off">
         <div id="searchResults"></div>
@@ -31,6 +81,10 @@
         <div class="related-title">Связанные стихи</div>
         <div id="relatedVerses"></div>
     </div>
+
+    <div id="authorCredit">
+        <span>© 2026 Никита Бученик</span>
+    </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
@@ -38,5 +92,31 @@
 <script src="graph.js"></script>
 <script src="search.js"></script>
 <script src="app.js"></script>
+
+<!-- Yandex.Metrika counter -->
+<script type="text/javascript" >
+    (function(m,e,t,r,i,k,a){
+        m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+        m[i].l=1*new Date();
+        for (var j = 0; j < document.scripts.length; j++) {
+            if (document.scripts[j].src === r) { return; }
+        }
+        k=e.createElement(t), a=e.getElementsByTagName(t)[0],
+        k.async=1, k.src=r, a.parentNode.insertBefore(k,a)
+    })
+    (window, document, "script", "https://mc.yandex.ru/metrika/tag.js", "ym");
+
+    ym(12345678, "init", {
+        clickmap: true,
+        trackLinks: true,
+        accurateTrackBounce: true,
+        webvisor: true
+    });
+</script>
+<noscript>
+    <div><img src="https://mc.yandex.ru/watch/12345678" style="position:absolute; left:-9999px;" alt="" /></div>
+</noscript>
+<!-- /Yandex.Metrika counter -->
+
 </body>
 </html>

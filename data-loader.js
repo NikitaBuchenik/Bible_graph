@@ -29,7 +29,7 @@ async function loadData() {
         if (!graphResponse.ok) throw new Error('Граф не найден');
         const graphDataRaw = await graphResponse.json();
 
-        const rstResponse = await fetch('rst.json');
+        const rstResponse = await fetch('rst_fixed.json');
         if (!rstResponse.ok) throw new Error('RST не найден');
         const rstData = await rstResponse.json();
 
