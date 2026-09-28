@@ -27,6 +27,83 @@ let renderTimeout = null;
 let nodeMap = {};
 let linkData = [];
 
+// Spatial index for fast viewport culling.
+// During pan/zoom we only inspect objects whose world-space cells intersect the viewport.
+const SPATIAL_CELL_SIZE = 600;
+const nodeGrid = new Map();
+const linkGrid = new Map();
+
+function getCellKey(x, y) {
+    return Math.floor(x / SPATIAL_CELL_SIZE) + ':' + Math.floor(y / SPATIAL_CELL_SIZE);
+}
+
+function addToGrid(grid, key, value) {
+    let bucket = grid.get(key);
+    if (!bucket) {
+        bucket = [];
+        grid.set(key, bucket);
+    }
+    bucket.push(value);
+}
+
+function buildSpatialIndex() {
+    nodeGrid.clear();
+    linkGrid.clear();
+
+    for (const node of allNodes) {
+        addToGrid(nodeGrid, getCellKey(node.x, node.y), node);
+    }
+
+    for (const link of linkData) {
+        const sourceKey = getCellKey(link.source.x, link.source.y);
+        const targetKey = getCellKey(link.target.x, link.target.y);
+        addToGrid(linkGrid, sourceKey, link);
+        if (targetKey !== sourceKey) {
+            addToGrid(linkGrid, targetKey, link);
+        }
+    }
+}
+
+function getVisibleObjects(viewLeft, viewRight, viewTop, viewBottom) {
+    const minCellX = Math.floor(viewLeft / SPATIAL_CELL_SIZE);
+    const maxCellX = Math.floor(viewRight / SPATIAL_CELL_SIZE);
+    const minCellY = Math.floor(viewTop / SPATIAL_CELL_SIZE);
+    const maxCellY = Math.floor(viewBottom / SPATIAL_CELL_SIZE);
+
+    const visibleNodes = [];
+    const visibleLinks = [];
+    const nodeSeen = new Set();
+    const linkSeen = new Set();
+
+    for (let cx = minCellX; cx <= maxCellX; cx++) {
+        for (let cy = minCellY; cy <= maxCellY; cy++) {
+            const key = cx + ':' + cy;
+
+            const nodesInCell = nodeGrid.get(key);
+            if (nodesInCell) {
+                for (const node of nodesInCell) {
+                    if (!nodeSeen.has(node)) {
+                        nodeSeen.add(node);
+                        visibleNodes.push(node);
+                    }
+                }
+            }
+
+            const linksInCell = linkGrid.get(key);
+            if (linksInCell) {
+                for (const link of linksInCell) {
+                    if (!linkSeen.has(link)) {
+                        linkSeen.add(link);
+                        visibleLinks.push(link);
+                    }
+                }
+            }
+        }
+    }
+
+    return { visibleNodes, visibleLinks };
+}
+
 window.nodeMap = nodeMap;
 
 function buildLayeredGraph(data) {
@@ -201,6 +278,8 @@ function initGraph(data, onNodeClick) {
         graph[l.source.id].neighbors.add(l.target.id);
     });
 
+    buildSpatialIndex();
+
     nodeGroup = g.append('g').attr('class', 'nodes');
     labelGroup = g.append('g').attr('class', 'labels');
 
@@ -208,10 +287,19 @@ function initGraph(data, onNodeClick) {
 
     zoom = d3.zoom()
         .scaleExtent([0.01, 2])
+        .on('start', () => {
+            nodeGroup.style('display', 'none');
+            labelGroup.style('display', 'none');
+        })
         .on('zoom', (event) => {
             currentTransform = event.transform;
             g.attr('transform', event.transform);
-            throttleRender();
+            throttleRender(true);
+        })
+        .on('end', () => {
+            nodeGroup.style('display', null);
+            labelGroup.style('display', null);
+            renderCanvas(false);
         });
 
     svg.call(zoom);
@@ -239,12 +327,12 @@ function initGraph(data, onNodeClick) {
     });
 }
 
-function throttleRender() {
+function throttleRender(interaction = false) {
     if (renderTimeout) {
         cancelAnimationFrame(renderTimeout);
     }
     renderTimeout = requestAnimationFrame(() => {
-        renderCanvas();
+        renderCanvas(interaction);
         renderTimeout = null;
     });
 }
@@ -328,7 +416,7 @@ function createInteractiveElements(onNodeClick) {
         .text(d => d.id);
 }
 
-function renderCanvas() {
+function renderCanvas(interaction = false) {
     if (!canvasCtx || !currentTransform) return;
     
     const width = canvas.width;
@@ -346,6 +434,36 @@ function renderCanvas() {
     const viewTop = -ty / scale - padding;
     const viewBottom = (height - ty) / scale + padding;
 
+    const visible = getVisibleObjects(viewLeft, viewRight, viewTop, viewBottom);
+    const visibleNodes = visible.visibleNodes;
+    const visibleLinks = visible.visibleLinks;
+
+    // During active pan/zoom, use a cheap representation:
+    // no 54k edges, no shadows, no strokes.
+    if (interaction) {
+        canvasCtx.save();
+        canvasCtx.globalAlpha = 0.9;
+
+        for (const node of visibleNodes) {
+            const x = node.x * scale + tx;
+            const y = node.y * scale + ty;
+
+            if (scale < 0.06) {
+                canvasCtx.fillStyle = node.id === 'Ин 3:16' ? '#ff6b6b' : '#607d8b';
+                canvasCtx.fillRect(Math.round(x), Math.round(y), 1, 1);
+                continue;
+            }
+
+            canvasCtx.beginPath();
+            canvasCtx.arc(x, y, node.id === 'Ин 3:16' ? 5 : 2.5, 0, Math.PI * 2);
+            canvasCtx.fillStyle = node.id === 'Ин 3:16' ? '#ff6b6b' : '#607d8b';
+            canvasCtx.fill();
+        }
+
+        canvasCtx.restore();
+        return;
+    }
+
     let highlightId = selectedNodeId || hoveredNodeId;
     let connectedIds = highlightConnectedIds;
     const isAllMode = currentDepth === Infinity;
@@ -356,7 +474,7 @@ function renderCanvas() {
     if (isSearchModeActive) {
         canvasCtx.beginPath();
         let hasLinks = false;
-        for (const link of linkData) {
+        for (const link of visibleLinks) {
             const source = link.source;
             const target = link.target;
             const sourceVisible = source.x >= viewLeft && source.x <= viewRight && 
@@ -385,7 +503,7 @@ function renderCanvas() {
     } else if (isAllMode) {
         canvasCtx.beginPath();
         let hasLinks = false;
-        for (const link of linkData) {
+        for (const link of visibleLinks) {
             const source = link.source;
             const target = link.target;
             const sourceVisible = source.x >= viewLeft && source.x <= viewRight && 
@@ -414,7 +532,7 @@ function renderCanvas() {
     } else if (hasHighlight && !isSearchModeActive) {
         // Тусклые связи
         canvasCtx.beginPath();
-        for (const link of linkData) {
+        for (const link of visibleLinks) {
             const source = link.source;
             const target = link.target;
             const sourceVisible = source.x >= viewLeft && source.x <= viewRight && 
@@ -442,7 +560,7 @@ function renderCanvas() {
         // Подсвеченные связи (только исходящие)
         canvasCtx.beginPath();
         let hasHighlightedLinks = false;
-        for (const link of linkData) {
+        for (const link of visibleLinks) {
             const source = link.source;
             const target = link.target;
             const sourceVisible = source.x >= viewLeft && source.x <= viewRight && 
@@ -471,7 +589,7 @@ function renderCanvas() {
         }
     } else {
         canvasCtx.beginPath();
-        for (const link of linkData) {
+        for (const link of visibleLinks) {
             const source = link.source;
             const target = link.target;
             const sourceVisible = source.x >= viewLeft && source.x <= viewRight && 
@@ -495,7 +613,7 @@ function renderCanvas() {
     }
 
     // Рисуем узлы
-    for (const node of allNodes) {
+    for (const node of visibleNodes) {
         const isVisible = node.x >= viewLeft && node.x <= viewRight && 
                          node.y >= viewTop && node.y <= viewBottom;
         
