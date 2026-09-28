@@ -699,36 +699,6 @@ function renderCanvas() {
     }
 }
 
-    // Labels are part of the cached canvas bitmap now, so the browser does
-    // not need to keep ~31k SVG text nodes alive during zoom.
-    canvasCtx.save();
-    canvasCtx.textAlign = 'center';
-    canvasCtx.textBaseline = 'alphabetic';
-    canvasCtx.fillStyle = '#cfd8dc';
-    canvasCtx.shadowColor = 'rgba(0,0,0,0.85)';
-    canvasCtx.shadowBlur = 4;
-
-    for (const node of allNodes) {
-        const isVisible = node.x >= viewLeft && node.x <= viewRight &&
-                         node.y >= viewTop && node.y <= viewBottom;
-        if (!isVisible) continue;
-
-        const x = node.x * scale + tx;
-        const y = node.y * scale + ty;
-        const isCenter = node.id === 'Ин 3:16';
-        const radius = isCenter ? 24 : 4 + Math.min(node.links_count || 0, 10) * 1;
-        const fontSize = (isCenter ? 14 : 7 + Math.min(node.links_count || 0, 6) * 0.3) * scale;
-
-        // At sub-pixel sizes the old SVG labels were effectively unreadable.
-        // Skipping them here avoids spending CPU on text that cannot be seen.
-        if (fontSize < 2) continue;
-
-        canvasCtx.font = `${isCenter ? 'bold ' : ''}${Math.max(fontSize, 2)}px Segoe UI, sans-serif`;
-        canvasCtx.fillText(node.id, x, y - (radius + 10) * scale);
-    }
-
-    canvasCtx.restore();
-
 function highlightNode(id, depth) {
     isHighlightActive = true;
     selectedNodeId = id;
@@ -808,4 +778,31 @@ function highlightSearchResults(refs) {
     
     document.getElementById('clearBtn').classList.remove('hidden');
     renderCanvas();
+    // Labels are cached into the same bitmap, so zooming does not touch
+    // tens of thousands of SVG text nodes.
+    canvasCtx.save();
+    canvasCtx.textAlign = 'center';
+    canvasCtx.textBaseline = 'alphabetic';
+    canvasCtx.fillStyle = '#cfd8dc';
+    canvasCtx.shadowColor = 'rgba(0,0,0,0.85)';
+    canvasCtx.shadowBlur = 4;
+
+    for (const node of allNodes) {
+        const isVisible = node.x >= viewLeft && node.x <= viewRight &&
+                         node.y >= viewTop && node.y <= viewBottom;
+        if (!isVisible) continue;
+
+        const x = node.x * scale + tx;
+        const y = node.y * scale + ty;
+        const isCenter = node.id === 'Ин 3:16';
+        const radius = isCenter ? 24 : 4 + Math.min(node.links_count || 0, 10);
+        const fontSize = (isCenter ? 14 : 7 + Math.min(node.links_count || 0, 6) * 0.3) * scale;
+
+        if (fontSize < 2) continue;
+
+        canvasCtx.font = (isCenter ? 'bold ' : '') + Math.max(fontSize, 2) + 'px Segoe UI, sans-serif';
+        canvasCtx.fillText(node.id, x, y - (radius + 10) * scale);
+    }
+
+    canvasCtx.restore();
 }
