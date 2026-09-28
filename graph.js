@@ -136,7 +136,7 @@ function buildLayeredGraph(data) {
         const grid = new Map();
 
         const cellKey = (x, y) =>
-            \`${Math.floor(x / collisionCellSize)},${Math.floor(y / collisionCellSize)}\`;
+            `${Math.floor(x / collisionCellSize)},${Math.floor(y / collisionCellSize)}`;
 
         for (const node of positioned) {
             const key = cellKey(node.x, node.y);
@@ -155,7 +155,7 @@ function buildLayeredGraph(data) {
 
             for (let dx = -1; dx <= 1; dx++) {
                 for (let dy = -1; dy <= 1; dy++) {
-                    const bucket = grid.get(\`${cellX + dx},${cellY + dy}\`);
+                    const bucket = grid.get(`${cellX + dx},${cellY + dy}`);
                     if (!bucket) continue;
 
                     for (const b of bucket) {
