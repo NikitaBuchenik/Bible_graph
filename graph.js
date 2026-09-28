@@ -109,6 +109,17 @@ function buildLayeredGraph(data) {
         }
         
         const count = group.length;
+        const minDistForLayer = layerNum === -1 ? 150 : 80;
+
+        // Make the ring large enough that nodes start out close to their
+        // required spacing. This keeps the original collision-resolution
+        // behavior, but prevents a dense 11k-node ring from producing
+        // millions of collision candidates.
+        const requiredRadius = count > 1
+            ? (count * (minDistForLayer + 20)) / (2 * Math.PI)
+            : 0;
+        radius = Math.max(radius, requiredRadius);
+
         const angleStep = (2 * Math.PI) / count;
         const offset = layerNum === -1 ? Math.random() * 0.5 : layerNum * 0.2;
 
