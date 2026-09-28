@@ -25,6 +25,7 @@ let searchLinkData = [];
 
 let renderTimeout = null;
 let nodeMap = {};
+let lastRenderTransform = null;
 let linkData = [];
 
 window.nodeMap = nodeMap;
@@ -240,12 +241,24 @@ function initGraph(data, onNodeClick) {
 }
 
 function throttleRender() {
-    if (renderTimeout) {
-        cancelAnimationFrame(renderTimeout);
-    }
+    // Keep exactly one canvas render scheduled for the current animation frame.
+    // D3 can emit several zoom events between frames; rendering once is enough.
+    if (renderTimeout !== null) return;
+
     renderTimeout = requestAnimationFrame(() => {
-        renderCanvas();
         renderTimeout = null;
+
+        if (!currentTransform) return;
+
+        // Avoid a second identical canvas paint.
+        if (lastRenderTransform &&
+            lastRenderTransform.k === currentTransform.k &&
+            lastRenderTransform.x === currentTransform.x &&
+            lastRenderTransform.y === currentTransform.y) {
+            return;
+        }
+
+        renderCanvas();
     });
 }
 
@@ -330,6 +343,11 @@ function createInteractiveElements(onNodeClick) {
 
 function renderCanvas() {
     if (!canvasCtx || !currentTransform) return;
+    lastRenderTransform = {
+        k: currentTransform.k,
+        x: currentTransform.x,
+        y: currentTransform.y
+    };
     
     const width = canvas.width;
     const height = canvas.height;
