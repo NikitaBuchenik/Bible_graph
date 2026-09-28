@@ -698,6 +698,36 @@ function renderCanvas() {
         }
     }
 }
+    
+    // Labels are rendered into the same bitmap. They are therefore not
+    // transformed as 31k individual SVG text nodes during zoom.
+    canvasCtx.save();
+    canvasCtx.textAlign = 'center';
+    canvasCtx.textBaseline = 'alphabetic';
+    canvasCtx.fillStyle = '#cfd8dc';
+    canvasCtx.shadowColor = 'rgba(0,0,0,0.85)';
+    canvasCtx.shadowBlur = 4;
+
+    for (const node of allNodes) {
+        const isVisible = node.x >= viewLeft && node.x <= viewRight &&
+                         node.y >= viewTop && node.y <= viewBottom;
+        if (!isVisible) continue;
+
+        const x = node.x * scale + tx;
+        const y = node.y * scale + ty;
+        const isCenter = node.id === 'Ин 3:16';
+        const radius = isCenter ? 24 : 4 + Math.min(node.links_count || 0, 10);
+        const fontSize = (isCenter ? 14 : 7 + Math.min(node.links_count || 0, 6) * 0.3) * scale;
+
+        if (fontSize < 2) continue;
+
+        canvasCtx.font = (isCenter ? 'bold ' : '') +
+            Math.max(fontSize, 2) + 'px Segoe UI, sans-serif';
+        canvasCtx.fillText(node.id, x, y - (radius + 10) * scale);
+    }
+
+    canvasCtx.restore();
+
 
 function highlightNode(id, depth) {
     isHighlightActive = true;
