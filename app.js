@@ -4,11 +4,14 @@ const loading = document.getElementById('loading');
 async function init() {
     try {
         const graphData = await loadData();
-        loading.classList.add('hidden');
+
+        // Show the real dataset size immediately, while the layout is prepared.
+        document.getElementById('nodeCount').textContent = graphData.nodes.length;
 
         const positioned = buildLayeredGraph(graphData);
         
         initGraph(positioned, onNodeClick);
+        loading.classList.add('hidden');
         setupSearch(onVerseSelected, onSearchResults);
 
         document.getElementById('clearBtn').addEventListener('click', () => {
