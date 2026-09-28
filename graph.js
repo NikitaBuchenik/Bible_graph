@@ -158,14 +158,15 @@ function buildLayeredGraph(data) {
 }
 
 function initGraph(data, onNodeClick) {
-    allNodes = data.nodes;
-    allLinks = data.links;
+    allNodes = data.nodes || [];
+    allLinks = data.links || [];
+
+    // Keep the original dataset/count semantics intact.
+    document.getElementById('nodeCount').textContent = allNodes.length;
 
     nodeMap = {};
     allNodes.forEach(n => nodeMap[n.id] = n);
     window.nodeMap = nodeMap;
-
-    document.getElementById('nodeCount').textContent = allNodes.length;
 
     const container = document.getElementById('container');
     const width = container.clientWidth;
