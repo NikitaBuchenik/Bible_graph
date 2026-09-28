@@ -727,7 +727,7 @@ function renderCanvas() {
     }
 
     canvasCtx.restore();
-
+}
 
 function highlightNode(id, depth) {
     isHighlightActive = true;
