@@ -126,29 +126,70 @@ function buildLayeredGraph(data) {
         });
     }
 
+    // Preserve the original 5 collision-resolution passes, but avoid the
+    // O(n²) all-pairs scan by using a spatial hash.
+    const collisionCellSize = 150;
+    const nodeIndexes = new Map();
+    positioned.forEach((node, index) => nodeIndexes.set(node, index));
+
     for (let iter = 0; iter < 5; iter++) {
+        const grid = new Map();
+
+        const cellKey = (x, y) =>
+            \`${Math.floor(x / collisionCellSize)},${Math.floor(y / collisionCellSize)}\`;
+
+        for (const node of positioned) {
+            const key = cellKey(node.x, node.y);
+            let bucket = grid.get(key);
+            if (!bucket) {
+                bucket = [];
+                grid.set(key, bucket);
+            }
+            bucket.push(node);
+        }
+
         for (let i = 0; i < positioned.length; i++) {
-            for (let j = i + 1; j < positioned.length; j++) {
-                const a = positioned[i];
-                const b = positioned[j];
-                const dx = a.x - b.x;
-                const dy = a.y - b.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                
-                let minDist;
-                if (a.layer === -1 || b.layer === -1) {
-                    minDist = 150;
-                } else {
-                    minDist = 80;
-                }
-                
-                if (dist < minDist && dist > 0) {
-                    const force = (minDist - dist) / 2;
-                    const angle = Math.atan2(dy, dx);
-                    a.x += Math.cos(angle) * force;
-                    a.y += Math.sin(angle) * force;
-                    b.x -= Math.cos(angle) * force;
-                    b.y -= Math.sin(angle) * force;
+            const a = positioned[i];
+            const cellX = Math.floor(a.x / collisionCellSize);
+            const cellY = Math.floor(a.y / collisionCellSize);
+
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    const bucket = grid.get(\`${cellX + dx},${cellY + dy}\`);
+                    if (!bucket) continue;
+
+                    for (const b of bucket) {
+                        const j = nodeIndexes.get(b);
+                        if (j <= i) continue;
+
+                        const minDist = (a.layer === -1 || b.layer === -1) ? 150 : 80;
+                        const minDistSq = minDist * minDist;
+                        const diffX = a.x - b.x;
+                        const diffY = a.y - b.y;
+                        const distSq = diffX * diffX + diffY * diffY;
+
+                        if (distSq >= minDistSq) continue;
+
+                        if (distSq === 0) {
+                            const angle = ((i * 0.61803398875 + j * 0.41421356237) % 1) * Math.PI * 2;
+                            const push = minDist / 2;
+                            a.x += Math.cos(angle) * push;
+                            a.y += Math.sin(angle) * push;
+                            b.x -= Math.cos(angle) * push;
+                            b.y -= Math.sin(angle) * push;
+                            continue;
+                        }
+
+                        const dist = Math.sqrt(distSq);
+                        const force = (minDist - dist) / 2;
+                        const nx = diffX / dist;
+                        const ny = diffY / dist;
+
+                        a.x += nx * force;
+                        a.y += ny * force;
+                        b.x -= nx * force;
+                        b.y -= ny * force;
+                    }
                 }
             }
         }
