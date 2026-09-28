@@ -50,11 +50,11 @@ function buildSpatialIndex() {
     nodeGrid.clear();
     linkGrid.clear();
 
-    for (const node of visibleNodes) {
+    for (const node of allNodes) {
         addToGrid(nodeGrid, getCellKey(node.x, node.y), node);
     }
 
-    for (const link of visibleLinks) {
+    for (const link of linkData) {
         const sourceKey = getCellKey(link.source.x, link.source.y);
         const targetKey = getCellKey(link.target.x, link.target.y);
         addToGrid(linkGrid, sourceKey, link);
@@ -613,7 +613,7 @@ function renderCanvas(interaction = false) {
     }
 
     // Рисуем узлы
-    for (const node of allNodes) {
+    for (const node of visibleNodes) {
         const isVisible = node.x >= viewLeft && node.x <= viewRight && 
                          node.y >= viewTop && node.y <= viewBottom;
         
