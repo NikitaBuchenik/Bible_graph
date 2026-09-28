@@ -27,6 +27,10 @@ let renderTimeout = null;
 let nodeMap = {};
 let lastRenderTransform = null;
 let linkData = [];
+let nodeSpatialGrid = new Map();
+const NODE_GRID_SIZE = 500;
+let zoomFrame = null;
+let zoomRenderPending = false;
 
 window.nodeMap = nodeMap;
 
@@ -175,8 +179,10 @@ function initGraph(data, onNodeClick) {
     canvas.style.left = '0';
     canvas.style.pointerEvents = 'none';
     canvas.style.zIndex = '1';
+    canvas.style.transformOrigin = '0 0';
+    canvas.style.willChange = 'transform';
     container.appendChild(canvas);
-    canvasCtx = canvas.getContext('2d');
+    canvasCtx = canvas.getContext('2d', { alpha: true, desynchronized: true });
 
     svg = d3.select('#container')
         .append('svg')
@@ -196,6 +202,8 @@ function initGraph(data, onNodeClick) {
         target: nodeMap[l.target]
     })).filter(l => l.source && l.target);
 
+    buildNodeSpatialGrid();
+
     graph = {};
     allNodes.forEach(n => graph[n.id] = { neighbors: new Set() });
     linkData.forEach(l => {
@@ -212,7 +220,15 @@ function initGraph(data, onNodeClick) {
         .on('zoom', (event) => {
             currentTransform = event.transform;
             g.attr('transform', event.transform);
-            throttleRender();
+            scheduleCanvasTransform();
+        })
+        .on('end', () => {
+            zoomRenderPending = false;
+            if (zoomFrame !== null) {
+                cancelAnimationFrame(zoomFrame);
+                zoomFrame = null;
+            }
+            renderCanvas();
         });
 
     svg.call(zoom);
@@ -233,6 +249,8 @@ function initGraph(data, onNodeClick) {
         const h = container.clientHeight;
         canvas.width = w;
         canvas.height = h;
+        canvas.style.transform = 'none';
+        lastRenderTransform = null;
         svg.attr('width', w).attr('height', h);
         if (currentTransform) {
             renderCanvas();
@@ -240,68 +258,75 @@ function initGraph(data, onNodeClick) {
     });
 }
 
-function throttleRender() {
-    // Keep exactly one canvas render scheduled for the current animation frame.
-    // D3 can emit several zoom events between frames; rendering once is enough.
-    if (renderTimeout !== null) return;
+function scheduleCanvasTransform() {
+    if (!canvas || !currentTransform || !lastRenderTransform) return;
 
-    renderTimeout = requestAnimationFrame(() => {
-        renderTimeout = null;
+    if (zoomFrame !== null) return;
 
-        if (!currentTransform) return;
+    zoomFrame = requestAnimationFrame(() => {
+        zoomFrame = null;
 
-        // Avoid a second identical canvas paint.
-        if (lastRenderTransform &&
-            lastRenderTransform.k === currentTransform.k &&
-            lastRenderTransform.x === currentTransform.x &&
-            lastRenderTransform.y === currentTransform.y) {
-            return;
-        }
+        if (!canvas || !currentTransform || !lastRenderTransform) return;
 
-        renderCanvas();
+        // The graph bitmap was rendered at lastRenderTransform.
+        // Instead of redrawing ~85k primitives on every wheel event,
+        // move/scale that already-rendered bitmap on the compositor.
+        const scale = currentTransform.k / lastRenderTransform.k;
+        const x = currentTransform.x - scale * lastRenderTransform.x;
+        const y = currentTransform.y - scale * lastRenderTransform.y;
+
+        canvas.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${scale})`;
     });
 }
 
+function throttleRender() {
+    scheduleCanvasTransform();
+}
+
 function createInteractiveElements(onNodeClick) {
-    nodeGroup.selectAll('circle')
-        .data(allNodes)
-        .enter()
-        .append('circle')
-        .attr('cx', d => d.x)
-        .attr('cy', d => d.y)
-        .attr('r', d => {
-            const isCenter = d.id === 'Ин 3:16';
-            return isCenter ? 30 : 15;
-        })
-        .attr('fill', 'transparent')
-        .attr('stroke', 'transparent')
-        .attr('cursor', 'pointer')
-        .attr('data-id', d => d.id)
-        .on('mouseover', function(event) {
-            if (hoverTimeout) {
-                clearTimeout(hoverTimeout);
+    // Keep SVG only as a lightweight interaction/zoom surface.
+    // The old implementation created ~31k circles + ~31k text nodes.
+    // Their geometry was transformed on every zoom event even though the
+    // actual graph is rendered on canvas. Hit testing is now done against
+    // a spatial index instead, preserving hover/click behavior without
+    // maintaining tens of thousands of DOM elements.
+
+    svg
+        .on('pointermove.graph', function(event) {
+            const node = getNodeAtPointer(event);
+
+            if (node) {
+                if (hoverTimeout) {
+                    clearTimeout(hoverTimeout);
+                    hoverTimeout = null;
+                }
+
+                if (hoveredNodeId !== node.id) {
+                    hoveredNodeId = node.id;
+                    isHovering = true;
+                    renderCanvas();
+                }
+
+                const rect = document.getElementById('container').getBoundingClientRect();
+                const tooltip = document.getElementById('tooltip');
+                tooltip.textContent = node.id;
+                tooltip.style.left = (event.clientX - rect.left + 12) + 'px';
+                tooltip.style.top = (event.clientY - rect.top - 10) + 'px';
+                tooltip.classList.add('visible');
+            } else if (hoveredNodeId !== null) {
+                if (hoverTimeout) clearTimeout(hoverTimeout);
+
+                hoverTimeout = setTimeout(() => {
+                    hoveredNodeId = null;
+                    isHovering = false;
+                    document.getElementById('tooltip').classList.remove('visible');
+                    renderCanvas();
+                }, 150);
             }
-            
-            const d = d3.select(this).datum();
-            hoveredNodeId = d.id;
-            isHovering = true;
-            
-            const rect = document.getElementById('container').getBoundingClientRect();
-            const tooltip = document.getElementById('tooltip');
-            tooltip.textContent = d.id;
-            tooltip.style.left = (event.clientX - rect.left + 12) + 'px';
-            tooltip.style.top = (event.clientY - rect.top - 10) + 'px';
-            tooltip.classList.add('visible');
-            
-            renderCanvas();
         })
-        .on('mousemove', function(event) {
-            const rect = document.getElementById('container').getBoundingClientRect();
-            const tooltip = document.getElementById('tooltip');
-            tooltip.style.left = (event.clientX - rect.left + 12) + 'px';
-            tooltip.style.top = (event.clientY - rect.top - 10) + 'px';
-        })
-        .on('mouseout', function() {
+        .on('pointerleave.graph', function() {
+            if (hoverTimeout) clearTimeout(hoverTimeout);
+
             hoverTimeout = setTimeout(() => {
                 hoveredNodeId = null;
                 isHovering = false;
@@ -309,40 +334,93 @@ function createInteractiveElements(onNodeClick) {
                 renderCanvas();
             }, 150);
         })
-        .on('click', function() {
-            const d = d3.select(this).datum();
+        .on('click.graph', function(event) {
+            const node = getNodeAtPointer(event);
+            if (!node) return;
+
             if (hoverTimeout) {
                 clearTimeout(hoverTimeout);
+                hoverTimeout = null;
             }
-            onNodeClick(d.id);
-        });
 
-    labelGroup.selectAll('text')
-        .data(allNodes)
-        .enter()
-        .append('text')
-        .attr('x', d => d.x)
-        .attr('y', d => {
-            const isCenter = d.id === 'Ин 3:16';
-            const radius = isCenter ? 24 : 4 + Math.min(d.links_count || 0, 10) * 1;
-            return d.y - radius - 10;
-        })
-        .attr('text-anchor', 'middle')
-        .attr('font-size', d => {
-            const isCenter = d.id === 'Ин 3:16';
-            return isCenter ? 14 : 7 + Math.min(d.links_count || 0, 6) * 0.3;
-        })
-        .attr('fill', '#cfd8dc')
-        .attr('font-family', 'Segoe UI, sans-serif')
-        .attr('font-weight', d => d.id === 'Ин 3:16' ? 'bold' : '400')
-        .attr('pointer-events', 'none')
-        .attr('data-id', d => d.id)
-        .style('text-shadow', '0 0 4px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.7)')
-        .text(d => d.id);
+            onNodeClick(node.id);
+        });
+}
+
+function buildNodeSpatialGrid() {
+    nodeSpatialGrid.clear();
+
+    for (const node of allNodes) {
+        const gx = Math.floor(node.x / NODE_GRID_SIZE);
+        const gy = Math.floor(node.y / NODE_GRID_SIZE);
+        const key = gx + ':' + gy;
+
+        let bucket = nodeSpatialGrid.get(key);
+        if (!bucket) {
+            bucket = [];
+            nodeSpatialGrid.set(key, bucket);
+        }
+        bucket.push(node);
+    }
+}
+
+function getNodeAtPointer(event) {
+    if (!currentTransform || !svg || !allNodes.length) return null;
+
+    const point = d3.pointer(event, svg.node());
+    const world = currentTransform.invert(point);
+    const scale = currentTransform.k;
+
+    // Preserve the old SVG hit-area semantics while avoiding a DOM element
+    // for every node. A small screen-space tolerance also makes nodes usable
+    // when zoomed far out.
+    const screenTolerance = Math.max(4, 8);
+    const worldTolerance = screenTolerance / Math.max(scale, 0.0001);
+
+    const minX = world[0] - worldTolerance;
+    const maxX = world[0] + worldTolerance;
+    const minY = world[1] - worldTolerance;
+    const maxY = world[1] + worldTolerance;
+
+    const minGX = Math.floor(minX / NODE_GRID_SIZE);
+    const maxGX = Math.floor(maxX / NODE_GRID_SIZE);
+    const minGY = Math.floor(minY / NODE_GRID_SIZE);
+    const maxGY = Math.floor(maxY / NODE_GRID_SIZE);
+
+    let closest = null;
+    let closestDistance = Infinity;
+
+    for (let gx = minGX; gx <= maxGX; gx++) {
+        for (let gy = minGY; gy <= maxGY; gy++) {
+            const bucket = nodeSpatialGrid.get(gx + ':' + gy);
+            if (!bucket) continue;
+
+            for (const node of bucket) {
+                const dx = node.x - world[0];
+                const dy = node.y - world[1];
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                const isCenter = node.id === 'Ин 3:16';
+                const nodeRadius = isCenter ? 30 : 15;
+                const hitRadius = Math.max(nodeRadius, worldTolerance);
+
+                if (distance <= hitRadius && distance < closestDistance) {
+                    closest = node;
+                    closestDistance = distance;
+                }
+            }
+        }
+    }
+
+    return closest;
 }
 
 function renderCanvas() {
     if (!canvasCtx || !currentTransform) return;
+    // A fresh render becomes the new bitmap baseline.
+    // Reset the temporary compositor transform before drawing.
+    canvas.style.transform = 'none';
+
     lastRenderTransform = {
         k: currentTransform.k,
         x: currentTransform.x,
@@ -620,6 +698,36 @@ function renderCanvas() {
         }
     }
 }
+
+    // Labels are part of the cached canvas bitmap now, so the browser does
+    // not need to keep ~31k SVG text nodes alive during zoom.
+    canvasCtx.save();
+    canvasCtx.textAlign = 'center';
+    canvasCtx.textBaseline = 'alphabetic';
+    canvasCtx.fillStyle = '#cfd8dc';
+    canvasCtx.shadowColor = 'rgba(0,0,0,0.85)';
+    canvasCtx.shadowBlur = 4;
+
+    for (const node of allNodes) {
+        const isVisible = node.x >= viewLeft && node.x <= viewRight &&
+                         node.y >= viewTop && node.y <= viewBottom;
+        if (!isVisible) continue;
+
+        const x = node.x * scale + tx;
+        const y = node.y * scale + ty;
+        const isCenter = node.id === 'Ин 3:16';
+        const radius = isCenter ? 24 : 4 + Math.min(node.links_count || 0, 10) * 1;
+        const fontSize = (isCenter ? 14 : 7 + Math.min(node.links_count || 0, 6) * 0.3) * scale;
+
+        // At sub-pixel sizes the old SVG labels were effectively unreadable.
+        // Skipping them here avoids spending CPU on text that cannot be seen.
+        if (fontSize < 2) continue;
+
+        canvasCtx.font = `${isCenter ? 'bold ' : ''}${Math.max(fontSize, 2)}px Segoe UI, sans-serif`;
+        canvasCtx.fillText(node.id, x, y - (radius + 10) * scale);
+    }
+
+    canvasCtx.restore();
 
 function highlightNode(id, depth) {
     isHighlightActive = true;
