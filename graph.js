@@ -26,6 +26,10 @@ let searchLinkData = [];
 let renderTimeout = null;
 let nodeMap = {};
 let linkData = [];
+let nodeSpatialGrid = new Map();
+const NODE_GRID_SIZE = 500;
+let zoomFrame = null;
+let lastRenderTransform = null;
 
 window.nodeMap = nodeMap;
 
@@ -195,6 +199,8 @@ function initGraph(data, onNodeClick) {
         target: nodeMap[l.target]
     })).filter(l => l.source && l.target);
 
+    buildNodeSpatialGrid();
+
     graph = {};
     allNodes.forEach(n => graph[n.id] = { neighbors: new Set() });
     linkData.forEach(l => {
@@ -211,7 +217,14 @@ function initGraph(data, onNodeClick) {
         .on('zoom', (event) => {
             currentTransform = event.transform;
             g.attr('transform', event.transform);
-            throttleRender();
+            scheduleCanvasTransform();
+        })
+        .on('end', () => {
+            if (zoomFrame !== null) {
+                cancelAnimationFrame(zoomFrame);
+                zoomFrame = null;
+            }
+            renderCanvas();
         });
 
     svg.call(zoom);
@@ -232,6 +245,8 @@ function initGraph(data, onNodeClick) {
         const h = container.clientHeight;
         canvas.width = w;
         canvas.height = h;
+        canvas.style.transform = 'none';
+        lastRenderTransform = null;
         svg.attr('width', w).attr('height', h);
         if (currentTransform) {
             renderCanvas();
@@ -239,56 +254,62 @@ function initGraph(data, onNodeClick) {
     });
 }
 
-function throttleRender() {
-    if (renderTimeout) {
-        cancelAnimationFrame(renderTimeout);
-    }
-    renderTimeout = requestAnimationFrame(() => {
-        renderCanvas();
-        renderTimeout = null;
+function scheduleCanvasTransform() {
+    if (!canvas || !currentTransform || !lastRenderTransform) return;
+    if (zoomFrame !== null) return;
+
+    zoomFrame = requestAnimationFrame(() => {
+        zoomFrame = null;
+        if (!canvas || !currentTransform || !lastRenderTransform) return;
+
+        const scale = currentTransform.k / lastRenderTransform.k;
+        const x = currentTransform.x - scale * lastRenderTransform.x;
+        const y = currentTransform.y - scale * lastRenderTransform.y;
+
+        canvas.style.transform =
+            \`translate3d(\${x}px, \${y}px, 0) scale(\${scale})\`;
     });
 }
 
 function createInteractiveElements(onNodeClick) {
-    nodeGroup.selectAll('circle')
-        .data(allNodes)
-        .enter()
-        .append('circle')
-        .attr('cx', d => d.x)
-        .attr('cy', d => d.y)
-        .attr('r', d => {
-            const isCenter = d.id === 'Ин 3:16';
-            return isCenter ? 30 : 15;
-        })
-        .attr('fill', 'transparent')
-        .attr('stroke', 'transparent')
-        .attr('cursor', 'pointer')
-        .attr('data-id', d => d.id)
-        .on('mouseover', function(event) {
-            if (hoverTimeout) {
-                clearTimeout(hoverTimeout);
+    // Keep SVG as a lightweight interaction surface only.
+    // The graph itself is rendered on Canvas, so creating ~31k SVG circles
+    // and ~31k SVG text nodes would make every zoom operation expensive.
+
+    svg
+        .on('pointermove.graph', function(event) {
+            const node = getNodeAtPointer(event);
+
+            if (node) {
+                if (hoverTimeout) {
+                    clearTimeout(hoverTimeout);
+                    hoverTimeout = null;
+                }
+
+                if (hoveredNodeId !== node.id) {
+                    hoveredNodeId = node.id;
+                    isHovering = true;
+                    renderCanvas();
+                }
+
+                const rect = document.getElementById('container').getBoundingClientRect();
+                const tooltip = document.getElementById('tooltip');
+                tooltip.textContent = node.id;
+                tooltip.style.left = (event.clientX - rect.left + 12) + 'px';
+                tooltip.style.top = (event.clientY - rect.top - 10) + 'px';
+                tooltip.classList.add('visible');
+            } else if (hoveredNodeId !== null) {
+                if (hoverTimeout) clearTimeout(hoverTimeout);
+                hoverTimeout = setTimeout(() => {
+                    hoveredNodeId = null;
+                    isHovering = false;
+                    document.getElementById('tooltip').classList.remove('visible');
+                    renderCanvas();
+                }, 150);
             }
-            
-            const d = d3.select(this).datum();
-            hoveredNodeId = d.id;
-            isHovering = true;
-            
-            const rect = document.getElementById('container').getBoundingClientRect();
-            const tooltip = document.getElementById('tooltip');
-            tooltip.textContent = d.id;
-            tooltip.style.left = (event.clientX - rect.left + 12) + 'px';
-            tooltip.style.top = (event.clientY - rect.top - 10) + 'px';
-            tooltip.classList.add('visible');
-            
-            renderCanvas();
         })
-        .on('mousemove', function(event) {
-            const rect = document.getElementById('container').getBoundingClientRect();
-            const tooltip = document.getElementById('tooltip');
-            tooltip.style.left = (event.clientX - rect.left + 12) + 'px';
-            tooltip.style.top = (event.clientY - rect.top - 10) + 'px';
-        })
-        .on('mouseout', function() {
+        .on('pointerleave.graph', function() {
+            if (hoverTimeout) clearTimeout(hoverTimeout);
             hoverTimeout = setTimeout(() => {
                 hoveredNodeId = null;
                 isHovering = false;
@@ -296,40 +317,76 @@ function createInteractiveElements(onNodeClick) {
                 renderCanvas();
             }, 150);
         })
-        .on('click', function() {
-            const d = d3.select(this).datum();
-            if (hoverTimeout) {
-                clearTimeout(hoverTimeout);
-            }
-            onNodeClick(d.id);
+        .on('click.graph', function(event) {
+            const node = getNodeAtPointer(event);
+            if (node) onNodeClick(node.id);
         });
+}
 
-    labelGroup.selectAll('text')
-        .data(allNodes)
-        .enter()
-        .append('text')
-        .attr('x', d => d.x)
-        .attr('y', d => {
-            const isCenter = d.id === 'Ин 3:16';
-            const radius = isCenter ? 24 : 4 + Math.min(d.links_count || 0, 10) * 1;
-            return d.y - radius - 10;
-        })
-        .attr('text-anchor', 'middle')
-        .attr('font-size', d => {
-            const isCenter = d.id === 'Ин 3:16';
-            return isCenter ? 14 : 7 + Math.min(d.links_count || 0, 6) * 0.3;
-        })
-        .attr('fill', '#cfd8dc')
-        .attr('font-family', 'Segoe UI, sans-serif')
-        .attr('font-weight', d => d.id === 'Ин 3:16' ? 'bold' : '400')
-        .attr('pointer-events', 'none')
-        .attr('data-id', d => d.id)
-        .style('text-shadow', '0 0 4px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.7)')
-        .text(d => d.id);
+function buildNodeSpatialGrid() {
+    nodeSpatialGrid = new Map();
+
+    for (const node of allNodes) {
+        const gx = Math.floor(node.x / NODE_GRID_SIZE);
+        const gy = Math.floor(node.y / NODE_GRID_SIZE);
+        const key = gx + ',' + gy;
+
+        let bucket = nodeSpatialGrid.get(key);
+        if (!bucket) {
+            bucket = [];
+            nodeSpatialGrid.set(key, bucket);
+        }
+        bucket.push(node);
+    }
+}
+
+function getNodeAtPointer(event) {
+    if (!currentTransform) return null;
+
+    const rect = document.getElementById('container').getBoundingClientRect();
+    const screenX = event.clientX - rect.left;
+    const screenY = event.clientY - rect.top;
+
+    const worldX = (screenX - currentTransform.x) / currentTransform.k;
+    const worldY = (screenY - currentTransform.y) / currentTransform.k;
+
+    const gx = Math.floor(worldX / NODE_GRID_SIZE);
+    const gy = Math.floor(worldY / NODE_GRID_SIZE);
+    const hitRadius = Math.max(30, 18 / currentTransform.k);
+
+    let best = null;
+    let bestDistSq = hitRadius * hitRadius;
+
+    for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+            const bucket = nodeSpatialGrid.get((gx + dx) + ',' + (gy + dy));
+            if (!bucket) continue;
+
+            for (const node of bucket) {
+                const px = node.x - worldX;
+                const py = node.y - worldY;
+                const distSq = px * px + py * py;
+
+                if (distSq <= bestDistSq) {
+                    bestDistSq = distSq;
+                    best = node;
+                }
+            }
+        }
+    }
+
+    return best;
 }
 
 function renderCanvas() {
     if (!canvasCtx || !currentTransform) return;
+
+    canvas.style.transform = 'none';
+    lastRenderTransform = {
+        x: currentTransform.x,
+        y: currentTransform.y,
+        k: currentTransform.k
+    };
     
     const width = canvas.width;
     const height = canvas.height;
@@ -601,6 +658,38 @@ function renderCanvas() {
             }
         }
     }
+
+    // Labels are kept visually identical, but rendered on Canvas so zooming
+    // never has to transform tens of thousands of SVG text nodes.
+    canvasCtx.save();
+    canvasCtx.textAlign = 'center';
+    canvasCtx.textBaseline = 'alphabetic';
+    canvasCtx.fillStyle = '#cfd8dc';
+    canvasCtx.font = '400 7px Segoe UI, sans-serif';
+
+    for (const node of allNodes) {
+        if (node.x < viewLeft || node.x > viewRight ||
+            node.y < viewTop || node.y > viewBottom) continue;
+
+        const isCenter = node.id === 'Ин 3:16';
+        const radius = isCenter ? 24 : 4 + Math.min(node.links_count || 0, 10);
+        const fontSize = isCenter ? 14 : 7 + Math.min(node.links_count || 0, 6) * 0.3;
+
+        canvasCtx.font = (isCenter ? 'bold ' : '400 ') +
+            fontSize + 'px Segoe UI, sans-serif';
+        canvasCtx.shadowColor = 'rgba(0,0,0,0.9)';
+        canvasCtx.shadowBlur = 4;
+        canvasCtx.fillStyle = '#cfd8dc';
+        canvasCtx.fillText(
+            node.id,
+            node.x * scale + tx,
+            node.y * scale + ty - radius - 10
+        );
+        canvasCtx.shadowColor = 'transparent';
+        canvasCtx.shadowBlur = 0;
+    }
+
+    canvasCtx.restore();
 }
 
 function highlightNode(id, depth) {
@@ -613,8 +702,9 @@ function highlightNode(id, depth) {
     const queue = [{ id: id, dist: 0 }];
     const connectedIds = new Set([id]);
     
-    while (queue.length > 0) {
-        const current = queue.shift();
+    let queueIndex = 0;
+    while (queueIndex < queue.length) {
+        const current = queue[queueIndex++];
         if (depth !== Infinity && current.dist >= depth) continue;
         
         const neighbors = graph[current.id]?.neighbors || new Set();
