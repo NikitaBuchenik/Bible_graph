@@ -41,6 +41,134 @@ const bookNames: Record<number, string> = {
   65:'Иуд',66:'Откр'
 };
 
+type PositionedNode = GraphNode & {
+  x: number;
+  y: number;
+  layer: number;
+};
+
+function buildPositions(rawNodes: GraphNode[], rawLinks: GraphLink[]): PositionedNode[] {
+  const CENTER = 'Ин 3:16';
+  const graph = new Map<string, Set<string>>();
+  rawNodes.forEach(n => graph.set(n.id, new Set()));
+  rawLinks.forEach(l => graph.get(l.source)?.add(l.target));
+
+  const layers = new Map<string, number>();
+  const visited = new Set<string>();
+  const queue: string[] = [];
+  let head = 0;
+  let maxLayer = 0;
+
+  if (graph.has(CENTER)) {
+    layers.set(CENTER, 0);
+    visited.add(CENTER);
+    queue.push(CENTER);
+  }
+
+  while (head < queue.length) {
+    const id = queue[head++];
+    const layer = layers.get(id) ?? 0;
+    for (const next of graph.get(id) ?? []) {
+      if (visited.has(next)) continue;
+      visited.add(next);
+      layers.set(next, layer + 1);
+      maxLayer = Math.max(maxLayer, layer + 1);
+      queue.push(next);
+    }
+  }
+
+  for (const n of rawNodes) {
+    if (!visited.has(n.id)) layers.set(n.id, -1);
+  }
+
+  const groups = new Map<number, GraphNode[]>();
+  for (const n of rawNodes) {
+    const layer = layers.get(n.id) ?? -1;
+    const group = groups.get(layer) ?? [];
+    group.push(n);
+    groups.set(layer, group);
+  }
+
+  const positioned: PositionedNode[] = [];
+  const center = rawNodes.find(n => n.id === CENTER);
+  if (center) positioned.push({ ...center, x: 0, y: 0, layer: 0 });
+
+  const radiusStep = 500;
+  const sorted = [...groups.keys()].filter(x => x !== 0).sort((a, b) => a - b);
+
+  for (const layer of sorted) {
+    const group = groups.get(layer)!;
+    let radius = layer === -1
+      ? radiusStep * (maxLayer + 5)
+      : radiusStep * (layer + 1);
+
+    const minDist = layer === -1 ? 150 : 80;
+    if (group.length > 1) {
+      radius = Math.max(radius, (group.length * (minDist + 20)) / (2 * Math.PI));
+    }
+
+    const step = (2 * Math.PI) / group.length;
+    const offset = layer === -1 ? 0.25 : layer * 0.2;
+
+    group.forEach((node, i) => {
+      const angle = i * step + offset;
+      const jitter = layer === -1 ? ((i * 0.754877666) % 1 - 0.5) * 200 : ((i * 0.618033988) % 1 - 0.5) * 60;
+      positioned.push({
+        ...node,
+        x: Math.cos(angle) * (radius + jitter),
+        y: Math.sin(angle) * (radius + jitter),
+        layer
+      });
+    });
+  }
+
+  // Same five collision passes as the original layout, but only compare
+  // nodes that can actually be within 150 world units of each other.
+  const index = new Map(positioned.map((n, i) => [n.id, i]));
+  const cellSize = 150;
+
+  for (let pass = 0; pass < 5; pass++) {
+    const grid = new Map<string, PositionedNode[]>();
+    for (const node of positioned) {
+      const key = `${Math.floor(node.x / cellSize)},${Math.floor(node.y / cellSize)}`;
+      const bucket = grid.get(key) ?? [];
+      bucket.push(node);
+      grid.set(key, bucket);
+    }
+
+    for (let i = 0; i < positioned.length; i++) {
+      const a = positioned[i];
+      const cx = Math.floor(a.x / cellSize);
+      const cy = Math.floor(a.y / cellSize);
+
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const bucket = grid.get(`${cx + dx},${cy + dy}`);
+          if (!bucket) continue;
+
+          for (const b of bucket) {
+            if ((index.get(b.id) ?? -1) <= i) continue;
+            const minDist = a.layer === -1 || b.layer === -1 ? 150 : 80;
+            const vx = a.x - b.x;
+            const vy = a.y - b.y;
+            const distSq = vx * vx + vy * vy;
+            if (distSq === 0 || distSq >= minDist * minDist) continue;
+
+            const dist = Math.sqrt(distSq);
+            const force = (minDist - dist) / 2;
+            a.x += (vx / dist) * force;
+            a.y += (vy / dist) * force;
+            b.x -= (vx / dist) * force;
+            b.y -= (vy / dist) * force;
+          }
+        }
+      }
+    }
+  }
+
+  return positioned;
+}
+
 async function loadGraph() {
   if (graphCache) return graphCache;
 
@@ -64,7 +192,7 @@ async function loadGraph() {
     }
   }
 
-  graphCache = { nodes, links };
+  graphCache = { nodes: buildPositions(nodes, links), links };
   return graphCache;
 }
 
