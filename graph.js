@@ -267,7 +267,7 @@ function scheduleCanvasTransform() {
         const y = currentTransform.y - scale * lastRenderTransform.y;
 
         canvas.style.transform =
-            \`translate3d(\${x}px, \${y}px, 0) scale(\${scale})\`;
+            `translate3d(${x}px, ${y}px, 0) scale(${scale})`;
     });
 }
 
