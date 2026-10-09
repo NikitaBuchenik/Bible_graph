@@ -37,22 +37,42 @@ export default function App() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    Promise.all([
-      fetch(API_URL + '/api/graph').then(r => {
-        if (!r.ok) throw new Error('Граф не найден');
-        return r.json();
-      }),
-      fetch(API_URL + '/api/verses').then(r => {
+    let active = true;
+
+    // Fetch both resources in parallel, but don't make the graph wait for
+    // the entire Bible text. The graph is the expensive first screen; show it
+    // as soon as its response is ready and let search data arrive afterwards.
+    fetch(API_URL + '/api/verses')
+      .then(r => {
         if (!r.ok) throw new Error('Библия не найдена');
         return r.json();
       })
-    ])
-      .then(([graphData, verseData]) => {
-        setGraph(graphData);
-        setVerses(verseData);
+      .then(verseData => {
+        if (active) setVerses(verseData);
       })
-      .catch(err => setError(err.message))
-      .finally(() => setLoading(false));
+      .catch(err => {
+        // Keep the graph usable if only the search/verse endpoint fails.
+        console.warn('Не удалось загрузить тексты стихов:', err.message);
+      });
+
+    fetch(API_URL + '/api/graph')
+      .then(r => {
+        if (!r.ok) throw new Error('Граф не найден');
+        return r.json();
+      })
+      .then(graphData => {
+        if (active) setGraph(graphData);
+      })
+      .catch(err => {
+        if (active) setError(err.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const verseMap = useMemo(() => {
