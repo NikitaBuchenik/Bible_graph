@@ -32,6 +32,8 @@ export default function App() {
   const [selectedRef, setSelectedRef] = useState(null);
   const [highlighted, setHighlighted] = useState(new Set());
   const [depth, setDepth] = useState(0);
+  const [searchMode, setSearchMode] = useState(false);
+  const clickState = useRef({ ref: null, count: 0 });
   const [statsOpen, setStatsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -104,43 +106,65 @@ export default function App() {
     const exact = verses.find(v => v.ref.toLowerCase() === q);
     if (exact) return [exact];
 
-    return verses
-      .filter(v =>
-        v.ref.toLowerCase().includes(q) ||
-        v.text.toLowerCase().includes(q)
-      )
-      .slice(0, 20);
+    return verses.filter(v =>
+      v.ref.toLowerCase().includes(q) ||
+      v.text.toLowerCase().includes(q)
+    );
   }, [query, verses]);
 
   const selectVerse = ref => {
-    setSelectedRef(ref);
-    setDepth(1);
+    setSearchMode(false);
 
-    const ids = new Set([ref]);
-    const queue = [ref];
-    let head = 0;
-
-    while (head < queue.length) {
-      const id = queue[head++];
-      if (id !== ref) break;
-
-      for (const next of adjacency.get(id) ?? []) {
-        ids.add(next);
+    // Повторное нажатие на тот же стих: 1) прямые связи, 2) все достижимые,
+    // 3) сброс — так же, как в рабочей веб-версии.
+    if (clickState.current.ref === ref) {
+      clickState.current.count += 1;
+      if (clickState.current.count === 1) {
+        setSelectedRef(ref);
+        setDepth(Infinity);
+        setHighlighted(getReachable(ref, adjacency));
+        return;
       }
+      if (clickState.current.count >= 2) {
+        clickState.current = { ref: null, count: 0 };
+        setSelectedRef(null);
+        setHighlighted(new Set());
+        setDepth(0);
+        return;
+      }
+    } else {
+      clickState.current = { ref, count: 0 };
     }
 
+    setSelectedRef(ref);
+    setDepth(1);
+    const ids = new Set([ref]);
+    for (const next of adjacency.get(ref) ?? []) ids.add(next);
     setHighlighted(ids);
   };
 
+  const runSearch = () => {
+    const refs = searchResults.map(v => v.ref);
+    if (!refs.length) return;
+    clickState.current = { ref: null, count: 0 };
+    setSelectedRef(null);
+    setDepth(0);
+    setSearchMode(true);
+    setHighlighted(new Set(refs));
+  };
+
   const selectRelated = ref => {
+    clickState.current = { ref: null, count: 0 };
     selectVerse(ref);
     setQuery(ref);
   };
 
   const clearSelection = () => {
+    clickState.current = { ref: null, count: 0 };
     setSelectedRef(null);
     setHighlighted(new Set());
     setDepth(0);
+    setSearchMode(false);
   };
 
   if (loading) {
@@ -170,6 +194,7 @@ export default function App() {
         graph={graph}
         selectedRef={selectedRef}
         highlighted={highlighted}
+        searchMode={searchMode}
         width={width}
         height={height}
         onSelect={selectVerse}
@@ -183,15 +208,22 @@ export default function App() {
           placeholderTextColor={COLORS.muted}
           style={styles.search}
           autoCorrect={false}
+          returnKeyType="search"
+          onSubmitEditing={runSearch}
         />
+        <Pressable style={styles.searchButton} onPress={runSearch}>
+          <Text style={styles.searchButtonText}>Поиск</Text>
+        </Pressable>
         {searchResults.length > 0 && (
           <View style={styles.results}>
-            {searchResults.map(v => (
+            {searchResults.slice(0, 20).map(v => (
               <Pressable
                 key={v.ref}
                 style={styles.result}
                 onPress={() => {
                   setQuery(v.ref);
+                  clickState.current = { ref: null, count: 0 };
+                  setSearchMode(false);
                   selectVerse(v.ref);
                 }}
               >
@@ -209,7 +241,10 @@ export default function App() {
         <Text style={styles.count}>{graph?.nodes.length ?? 0} стихов</Text>
       </View>
 
-      <Pressable style={styles.statsButton} onPress={() => setStatsOpen(v => !v)}>
+      <Pressable
+        style={[styles.statsButton, statsOpen && styles.statsButtonOpen]}
+        onPress={() => setStatsOpen(v => !v)}
+      >
         <Text style={styles.statsButtonText}>{statsOpen ? '×' : '📊'}</Text>
       </Pressable>
 
@@ -263,7 +298,23 @@ function Stat({ label, value }) {
   );
 }
 
-function GraphView({ graph, selectedRef, highlighted, width, height, onSelect }) {
+function getReachable(start, adjacency) {
+  const visited = new Set([start]);
+  const queue = [start];
+  let head = 0;
+  while (head < queue.length) {
+    const current = queue[head++];
+    for (const next of adjacency.get(current) ?? []) {
+      if (!visited.has(next)) {
+        visited.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return visited;
+}
+
+function GraphView({ graph, selectedRef, highlighted, searchMode, width, height, onSelect }) {
   const nodes = graph?.nodes ?? [];
   const links = graph?.links ?? [];
   const centerX = width / 2;
@@ -282,9 +333,9 @@ function GraphView({ graph, selectedRef, highlighted, width, height, onSelect })
       const a = nodeMap.get(link.source);
       const b = nodeMap.get(link.target);
       if (!a || !b) continue;
-      const isHighlighted = selectedRef &&
-        (link.source === selectedRef || link.target === selectedRef) &&
-        (highlighted.has(link.source) || highlighted.has(link.target));
+      const isHighlighted = searchMode
+        ? highlighted.has(link.source) && highlighted.has(link.target)
+        : selectedRef && highlighted.has(link.source) && highlighted.has(link.target);
       const path = isHighlighted ? highlightedLinksPath : linksPath;
       path.moveTo(a.x, a.y);
       path.lineTo(b.x, b.y);
@@ -332,7 +383,7 @@ function GraphView({ graph, selectedRef, highlighted, width, height, onSelect })
       selected: selected.build(),
       highlighted: highlightedNodes.build()
     };
-  }, [nodes, links, nodeMap, selectedRef, highlighted]);
+  }, [nodes, links, nodeMap, selectedRef, highlighted, searchMode]);
 
   const transformRef = useRef({
     scale: 0.35,
@@ -436,7 +487,7 @@ function GraphView({ graph, selectedRef, highlighted, width, height, onSelect })
         ]}
       >
         <Path path={paths.links} style="stroke" strokeWidth={0.8} color="rgba(42,48,60,0.2)" />
-        <Path path={paths.highlightedLinks} style="stroke" strokeWidth={2.2} color="#ffcc80" />
+        <Path path={paths.highlightedLinks} style="stroke" strokeWidth={searchMode ? 1.8 : 2.2} color="#ffcc80" />
         <Path path={paths.isolated} color="#455a64" />
         <Path path={paths.layer1} color="#ffcc80" />
         <Path path={paths.layer2} color="#80cbc4" />
@@ -488,6 +539,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     fontSize: 14
   },
+  searchButton: {
+    marginTop: 7,
+    height: 36,
+    borderRadius: 9,
+    backgroundColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  searchButtonText: { color: '#171717', fontSize: 14, fontWeight: '700' },
   results: { marginTop: 8, maxHeight: 300 },
   result: {
     padding: 9,
@@ -512,6 +572,7 @@ const styles = StyleSheet.create({
     right: 0,
     top: '50%',
     marginTop: -28,
+    zIndex: 40,
     width: 46,
     height: 56,
     borderTopLeftRadius: 12,
@@ -523,6 +584,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center'
   },
+  statsButtonOpen: { backgroundColor: '#202630' },
   statsButtonText: { color: COLORS.accent, fontSize: 22 },
   statsPanel: {
     position: 'absolute',
