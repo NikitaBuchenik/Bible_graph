@@ -1,0 +1,21 @@
+# Системное
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Редакторы
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python (у тебя есть preprocess.py, fix_ps.py, test.py)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Логи
+*.log
+npm-debug.log*
+yarn-error.log*

@@ -1,0 +1,18 @@
+# зависимости
+node_modules/
+
+# сборка TypeScript
+dist/
+*.tsbuildinfo
+
+# env
+.env
+.env.local
+.env.*.local
+
+# логи
+*.log
+npm-debug.log*
+
+# системное
+.DS_Store
