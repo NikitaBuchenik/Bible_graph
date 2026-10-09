@@ -1,7 +1,9 @@
 import express from 'express';
 import cors from 'cors';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 type GraphNode = {
@@ -172,10 +174,31 @@ function buildPositions(rawNodes: GraphNode[], rawLinks: GraphLink[]): Positione
 async function loadGraph() {
   if (graphCache) return graphCache;
 
-  const raw = JSON.parse(
-    await readFile(path.join(root, 'bible_gece_graph.json'), 'utf8')
-  ) as Record<string, string[]>;
+  const sourcePath = path.join(root, 'bible_gece_graph.json');
+  const sourceStat = await stat(sourcePath);
+  const cacheKey = createHash('sha1').update(sourcePath).digest('hex');
+  const cachePath = path.join(tmpdir(), `bible-graph-${cacheKey}-layout-v1.json`);
 
+  // Keep the expensive layout between backend restarts. The cache is invalidated
+  // automatically when the source graph file changes.
+  try {
+    const cached = JSON.parse(await readFile(cachePath, 'utf8')) as {
+      sourceMtimeMs: number;
+      sourceSize: number;
+      graph: { nodes: PositionedNode[]; links: GraphLink[] };
+    };
+    if (
+      cached.sourceMtimeMs === sourceStat.mtimeMs &&
+      cached.sourceSize === sourceStat.size
+    ) {
+      graphCache = cached.graph;
+      return graphCache;
+    }
+  } catch {
+    // First launch or invalid cache: build the layout below.
+  }
+
+  const raw = JSON.parse(await readFile(sourcePath, 'utf8')) as Record<string, string[]>;
   const nodes: GraphNode[] = [];
   const links: GraphLink[] = [];
   const linkSet = new Set<string>();
@@ -193,6 +216,21 @@ async function loadGraph() {
   }
 
   graphCache = { nodes: buildPositions(nodes, links), links };
+
+  // A cache-write failure must not prevent serving the graph.
+  try {
+    await writeFile(
+      cachePath,
+      JSON.stringify({
+        sourceMtimeMs: sourceStat.mtimeMs,
+        sourceSize: sourceStat.size,
+        graph: graphCache
+      })
+    );
+  } catch (error) {
+    console.warn('Не удалось сохранить кэш раскладки графа:', error);
+  }
+
   return graphCache;
 }
 
