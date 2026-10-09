@@ -445,9 +445,6 @@ function GraphView({ graph, selectedRef, highlighted, width, height, onSelect })
         <Path path={paths.highlighted} color="#ffcc80" />
         <Path path={paths.selected} color="#ffcc80" />
       </Group>
-      <Group>
-        <Path path={Skia.Path.Make()} />
-      </Group>
     </Canvas>
   );
 }
