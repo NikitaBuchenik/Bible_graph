@@ -175,7 +175,7 @@ export default function App() {
         onSelect={selectVerse}
       />
 
-      <View style={styles.searchPanel}>
+      <View style={[styles.searchPanel, { top: 62 }]}>
         <TextInput
           value={query}
           onChangeText={setQuery}
@@ -215,6 +215,9 @@ export default function App() {
 
       {statsOpen && (
         <View style={styles.statsPanel}>
+          <Pressable style={styles.statsClose} onPress={() => setStatsOpen(false)}>
+            <Text style={styles.closeText}>×</Text>
+          </Pressable>
           <Text style={styles.panelTitle}>Статистика графа</Text>
           <Stat label="Всего стихов" value="31161" />
           <Stat label="Со связями" value="19614" />
@@ -274,12 +277,17 @@ function GraphView({ graph, selectedRef, highlighted, width, height, onSelect })
 
   const paths = useMemo(() => {
     const linksPath = Skia.PathBuilder.Make();
+    const highlightedLinksPath = Skia.PathBuilder.Make();
     for (const link of links) {
       const a = nodeMap.get(link.source);
       const b = nodeMap.get(link.target);
       if (!a || !b) continue;
-      linksPath.moveTo(a.x, a.y);
-      linksPath.lineTo(b.x, b.y);
+      const isHighlighted = selectedRef &&
+        (link.source === selectedRef || link.target === selectedRef) &&
+        (highlighted.has(link.source) || highlighted.has(link.target));
+      const path = isHighlighted ? highlightedLinksPath : linksPath;
+      path.moveTo(a.x, a.y);
+      path.lineTo(b.x, b.y);
     }
 
     const normalNodes = Skia.PathBuilder.Make();
@@ -315,6 +323,7 @@ function GraphView({ graph, selectedRef, highlighted, width, height, onSelect })
 
     return {
       links: linksPath.build(),
+      highlightedLinks: highlightedLinksPath.build(),
       normal: normalNodes.build(),
       layer1: layer1.build(),
       layer2: layer2.build(),
@@ -332,6 +341,7 @@ function GraphView({ graph, selectedRef, highlighted, width, height, onSelect })
   });
   const [transform, setTransform] = useState(transformRef.current);
   const gestureStart = useRef(null);
+  const pinchStart = useRef(null);
 
   const findNode = (screenX, screenY) => {
     const t = transformRef.current;
@@ -375,11 +385,15 @@ function GraphView({ graph, selectedRef, highlighted, width, height, onSelect })
 
       let next = { ...start.transform };
 
-      if (touches.length >= 2 && start.distance) {
+      if (touches.length >= 2) {
         const distance = touchDistance(touches);
-        const factor = Math.max(0.35, Math.min(2.5, distance / start.distance));
-        next.scale = Math.max(0.01, Math.min(2, start.transform.scale * factor));
+        if (!pinchStart.current) {
+          pinchStart.current = { distance, scale: transformRef.current.scale };
+        }
+        const factor = distance / Math.max(1, pinchStart.current.distance);
+        next = { ...transformRef.current, scale: Math.max(0.03, Math.min(3, pinchStart.current.scale * factor)) };
       } else if (touches.length === 1) {
+        pinchStart.current = null;
         next.x = start.transform.x + (touches[0].pageX - start.x);
         next.y = start.transform.y + (touches[0].pageY - start.y);
       }
@@ -408,6 +422,7 @@ function GraphView({ graph, selectedRef, highlighted, width, height, onSelect })
       }
 
       gestureStart.current = null;
+      pinchStart.current = null;
     }
   }), [nodes, onSelect, transform]);
 
@@ -421,6 +436,7 @@ function GraphView({ graph, selectedRef, highlighted, width, height, onSelect })
         ]}
       >
         <Path path={paths.links} style="stroke" strokeWidth={0.8} color="rgba(42,48,60,0.2)" />
+        <Path path={paths.highlightedLinks} style="stroke" strokeWidth={2.2} color="#ffcc80" />
         <Path path={paths.isolated} color="#455a64" />
         <Path path={paths.layer1} color="#ffcc80" />
         <Path path={paths.layer2} color="#80cbc4" />
@@ -428,6 +444,9 @@ function GraphView({ graph, selectedRef, highlighted, width, height, onSelect })
         <Path path={paths.normal} color="#ff6b6b" />
         <Path path={paths.highlighted} color="#ffcc80" />
         <Path path={paths.selected} color="#ffcc80" />
+      </Group>
+      <Group>
+        <Path path={Skia.Path.Make()} />
       </Group>
     </Canvas>
   );
@@ -518,7 +537,17 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1,
     borderLeftColor: COLORS.border,
     padding: 22,
+    paddingTop: 58,
     zIndex: 30
+  },
+  statsClose: {
+    position: 'absolute',
+    right: 14,
+    top: 12,
+    zIndex: 2,
+    padding: 8,
+    backgroundColor: '#1a2028',
+    borderRadius: 20
   },
   panelTitle: {
     color: COLORS.accent,
