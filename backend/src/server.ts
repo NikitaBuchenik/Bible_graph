@@ -179,7 +179,7 @@ async function loadGraph() {
   const sourcePath = path.join(root, 'bible_gece_graph.json');
   const sourceStat = await stat(sourcePath);
   const cacheKey = createHash('sha1').update(sourcePath).digest('hex');
-  const cachePath = path.join(tmpdir(), `bible-graph-${cacheKey}-layout-v1.json`);
+  const cachePath = path.join(tmpdir(), `bible-graph-${cacheKey}-layout-v2.json`);
 
   // Keep the expensive layout between backend restarts. The cache is invalidated
   // automatically when the source graph file changes.
