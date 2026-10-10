@@ -33,6 +33,9 @@ export default function App() {
   const [highlighted, setHighlighted] = useState(new Set());
   const [depth, setDepth] = useState(0);
   const [searchMode, setSearchMode] = useState(false);
+  const [searchRefs, setSearchRefs] = useState(new Set());
+  const [focusRequest, setFocusRequest] = useState(null);
+  const focusSequence = useRef(0);
   const clickState = useRef({ ref: null, count: 0 });
   const [statsOpen, setStatsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -137,6 +140,8 @@ export default function App() {
     }
 
     setSelectedRef(ref);
+    setFocusRequest({ refs: [ref], sequence: ++focusSequence.current });
+    setSearchRefs(new Set());
     setDepth(1);
     const ids = new Set([ref]);
     for (const next of adjacency.get(ref) ?? []) ids.add(next);
@@ -150,7 +155,18 @@ export default function App() {
     setSelectedRef(null);
     setDepth(0);
     setSearchMode(true);
-    setHighlighted(new Set(refs));
+    setSearchRefs(new Set(refs));
+    setFocusRequest({ refs, sequence: ++focusSequence.current });
+    // Подсвечиваем найденные стихи и их непосредственных соседей,
+    // чтобы было видно все прямые связи каждого результата.
+    const ids = new Set(refs);
+    for (const ref of refs) {
+      for (const next of adjacency.get(ref) ?? []) ids.add(next);
+    }
+    for (const link of graph?.links ?? []) {
+      if (refs.includes(link.target)) ids.add(link.source);
+    }
+    setHighlighted(ids);
   };
 
   const selectRelated = ref => {
@@ -165,6 +181,7 @@ export default function App() {
     setHighlighted(new Set());
     setDepth(0);
     setSearchMode(false);
+    setSearchRefs(new Set());
   };
 
   if (loading) {
@@ -195,6 +212,8 @@ export default function App() {
         selectedRef={selectedRef}
         highlighted={highlighted}
         searchMode={searchMode}
+        searchRefs={searchRefs}
+        focusRequest={focusRequest}
         width={width}
         height={height}
         onSelect={selectVerse}
@@ -314,7 +333,7 @@ function getReachable(start, adjacency) {
   return visited;
 }
 
-function GraphView({ graph, selectedRef, highlighted, searchMode, width, height, onSelect }) {
+function GraphView({ graph, selectedRef, highlighted, searchMode, searchRefs, focusRequest, width, height, onSelect }) {
   const nodes = graph?.nodes ?? [];
   const links = graph?.links ?? [];
   const centerX = width / 2;
@@ -334,7 +353,7 @@ function GraphView({ graph, selectedRef, highlighted, searchMode, width, height,
       const b = nodeMap.get(link.target);
       if (!a || !b) continue;
       const isHighlighted = searchMode
-        ? highlighted.has(link.source) && highlighted.has(link.target)
+        ? searchRefs.has(link.source) || searchRefs.has(link.target)
         : selectedRef && highlighted.has(link.source) && highlighted.has(link.target);
       const path = isHighlighted ? highlightedLinksPath : linksPath;
       path.moveTo(a.x, a.y);
@@ -383,7 +402,7 @@ function GraphView({ graph, selectedRef, highlighted, searchMode, width, height,
       selected: selected.build(),
       highlighted: highlightedNodes.build()
     };
-  }, [nodes, links, nodeMap, selectedRef, highlighted, searchMode]);
+  }, [nodes, links, nodeMap, selectedRef, highlighted, searchMode, searchRefs]);
 
   const transformRef = useRef({
     scale: 0.35,
@@ -393,6 +412,54 @@ function GraphView({ graph, selectedRef, highlighted, searchMode, width, height,
   const [transform, setTransform] = useState(transformRef.current);
   const gestureStart = useRef(null);
   const pinchStart = useRef(null);
+  const animationFrame = useRef(null);
+
+  useEffect(() => {
+    if (!focusRequest?.refs?.length || !nodes.length || width <= 0 || height <= 0) return;
+    const targetNodes = focusRequest.refs.map(ref => nodeMap.get(ref)).filter(Boolean);
+    if (!targetNodes.length) return;
+
+    let minX = Math.min(...targetNodes.map(n => n.x));
+    let maxX = Math.max(...targetNodes.map(n => n.x));
+    let minY = Math.min(...targetNodes.map(n => n.y));
+    let maxY = Math.max(...targetNodes.map(n => n.y));
+    const midX = (minX + maxX) / 2;
+    const midY = (minY + maxY) / 2;
+    const spanX = Math.max(180, maxX - minX + 120);
+    const spanY = Math.max(180, maxY - minY + 180);
+    const availableWidth = Math.max(180, width - 48);
+    const availableHeight = Math.max(220, height - 210);
+    const targetScale = Math.max(0.035, Math.min(0.9, availableWidth / spanX, availableHeight / spanY));
+    const target = {
+      scale: targetScale,
+      x: width / 2 - midX * targetScale,
+      y: height / 2 - midY * targetScale
+    };
+    const start = { ...transformRef.current };
+    const startedAt = Date.now();
+    const duration = 650;
+
+    if (animationFrame.current != null) cancelAnimationFrame(animationFrame.current);
+    const animate = () => {
+      const progress = Math.min(1, (Date.now() - startedAt) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const next = {
+        scale: start.scale + (target.scale - start.scale) * eased,
+        x: start.x + (target.x - start.x) * eased,
+        y: start.y + (target.y - start.y) * eased
+      };
+      transformRef.current = next;
+      setTransform(next);
+      if (progress < 1) animationFrame.current = requestAnimationFrame(animate);
+      else animationFrame.current = null;
+    };
+    animationFrame.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (animationFrame.current != null) cancelAnimationFrame(animationFrame.current);
+      animationFrame.current = null;
+    };
+  }, [focusRequest, nodes, nodeMap, width, height]);
 
   const findNode = (screenX, screenY) => {
     const t = transformRef.current;
