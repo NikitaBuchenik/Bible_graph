@@ -150,7 +150,13 @@ export default function App() {
 
   const runSearch = () => {
     const refs = searchResults.map(v => v.ref);
-    if (!refs.length) return;
+    if (!refs.length) {
+      setSearchMode(false);
+      setSearchRefs(new Set());
+      setHighlighted(new Set());
+      return;
+    }
+    const refSet = new Set(refs);
     clickState.current = { ref: null, count: 0 };
     setSelectedRef(null);
     setDepth(0);
@@ -164,7 +170,7 @@ export default function App() {
       for (const next of adjacency.get(ref) ?? []) ids.add(next);
     }
     for (const link of graph?.links ?? []) {
-      if (refs.includes(link.target)) ids.add(link.source);
+      if (refSet.has(link.target)) ids.add(link.source);
     }
     setHighlighted(ids);
   };
@@ -413,41 +419,100 @@ function GraphView({ graph, selectedRef, highlighted, searchMode, searchRefs, fo
   const gestureStart = useRef(null);
   const pinchStart = useRef(null);
   const animationFrame = useRef(null);
+  const bounds = useMemo(() => {
+    if (!nodes.length) return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const node of nodes) {
+      minX = Math.min(minX, node.x);
+      maxX = Math.max(maxX, node.x);
+      minY = Math.min(minY, node.y);
+      maxY = Math.max(maxY, node.y);
+    }
+    return { minX, maxX, minY, maxY };
+  }, [nodes]);
+
+  const clampTransform = (value) => {
+    const scale = Math.max(0.008, Math.min(3, value.scale));
+    const left = -bounds.minX * scale + 36;
+    const right = width - bounds.maxX * scale - 36;
+    const top = -bounds.minY * scale + 80;
+    const bottom = height - bounds.maxY * scale - 80;
+    const clampAxis = (v, low, high, center) => low > high ? center : Math.max(low, Math.min(high, v));
+    return {
+      scale,
+      x: clampAxis(value.x, right, left, width / 2 - ((bounds.minX + bounds.maxX) / 2) * scale),
+      y: clampAxis(value.y, bottom, top, height / 2 - ((bounds.minY + bounds.maxY) / 2) * scale)
+    };
+  };
 
   useEffect(() => {
     if (!focusRequest?.refs?.length || !nodes.length || width <= 0 || height <= 0) return;
-    const targetNodes = focusRequest.refs.map(ref => nodeMap.get(ref)).filter(Boolean);
-    if (!targetNodes.length) return;
+    // Iterate rather than spreading into Math.min/max: text searches can return
+    // thousands of refs and exceed the JS argument limit.
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    let count = 0;
+    for (const ref of focusRequest.refs) {
+      const n = nodeMap.get(ref);
+      if (!n) continue;
+      count++;
+      minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x);
+      minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y);
+    }
+    if (!count) return;
 
-    let minX = Math.min(...targetNodes.map(n => n.x));
-    let maxX = Math.max(...targetNodes.map(n => n.x));
-    let minY = Math.min(...targetNodes.map(n => n.y));
-    let maxY = Math.max(...targetNodes.map(n => n.y));
     const midX = (minX + maxX) / 2;
     const midY = (minY + maxY) / 2;
-    const spanX = Math.max(180, maxX - minX + 120);
-    const spanY = Math.max(180, maxY - minY + 180);
-    const availableWidth = Math.max(180, width - 48);
-    const availableHeight = Math.max(220, height - 210);
-    const targetScale = Math.max(0.035, Math.min(0.9, availableWidth / spanX, availableHeight / spanY));
-    const target = {
+    const spanX = Math.max(180, maxX - minX + 140);
+    const spanY = Math.max(180, maxY - minY + 200);
+    const availableWidth = Math.max(140, width - 56);
+    const availableHeight = Math.max(180, height - 230);
+    // No hard minimum: if a query matches many distant verses, fit every match.
+    const targetScale = Math.min(0.9, availableWidth / spanX, availableHeight / spanY);
+    const target = clampTransform({
       scale: targetScale,
       x: width / 2 - midX * targetScale,
       y: height / 2 - midY * targetScale
-    };
+    });
     const start = { ...transformRef.current };
+    const zoomOutScale = Math.max(0.008, Math.min(start.scale, target.scale, 0.07));
+    const zoomOut = {
+      scale: zoomOutScale,
+      x: width / 2 - midX * zoomOutScale,
+      y: height / 2 - midY * zoomOutScale
+    };
     const startedAt = Date.now();
-    const duration = 650;
+    const duration = 1550;
 
     if (animationFrame.current != null) cancelAnimationFrame(animationFrame.current);
+    const ease = t => t < 0.5
+      ? 4 * t * t * t
+      : 1 - Math.pow(-2 * t + 2, 3) / 2;
     const animate = () => {
       const progress = Math.min(1, (Date.now() - startedAt) / duration);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      const next = {
-        scale: start.scale + (target.scale - start.scale) * eased,
-        x: start.x + (target.x - start.x) * eased,
-        y: start.y + (target.y - start.y) * eased
-      };
+      let next;
+      if (progress < 0.34) {
+        const t = ease(progress / 0.34);
+        next = {
+          scale: start.scale + (zoomOut.scale - start.scale) * t,
+          x: start.x + (zoomOut.x - start.x) * t,
+          y: start.y + (zoomOut.y - start.y) * t
+        };
+      } else if (progress < 0.68) {
+        const t = ease((progress - 0.34) / 0.34);
+        next = {
+          scale: zoomOut.scale,
+          x: zoomOut.x + (target.x - zoomOut.x) * t,
+          y: zoomOut.y + (target.y - zoomOut.y) * t
+        };
+      } else {
+        const t = ease((progress - 0.68) / 0.32);
+        next = {
+          scale: zoomOut.scale + (target.scale - zoomOut.scale) * t,
+          x: zoomOut.x + (target.x - zoomOut.x) * t,
+          y: zoomOut.y + (target.y - zoomOut.y) * t
+        };
+      }
+      next = clampTransform(next);
       transformRef.current = next;
       setTransform(next);
       if (progress < 1) animationFrame.current = requestAnimationFrame(animate);
@@ -459,7 +524,7 @@ function GraphView({ graph, selectedRef, highlighted, searchMode, searchRefs, fo
       if (animationFrame.current != null) cancelAnimationFrame(animationFrame.current);
       animationFrame.current = null;
     };
-  }, [focusRequest, nodes, nodeMap, width, height]);
+  }, [focusRequest, nodes, nodeMap, width, height, bounds]);
 
   const findNode = (screenX, screenY) => {
     const t = transformRef.current;
@@ -505,15 +570,28 @@ function GraphView({ graph, selectedRef, highlighted, searchMode, searchRefs, fo
 
       if (touches.length >= 2) {
         const distance = touchDistance(touches);
+        const midpoint = touchMidpoint(touches);
         if (!pinchStart.current) {
-          pinchStart.current = { distance, scale: transformRef.current.scale };
+          const current = transformRef.current;
+          pinchStart.current = {
+            distance,
+            scale: current.scale,
+            worldX: (midpoint.x - current.x) / current.scale,
+            worldY: (midpoint.y - current.y) / current.scale
+          };
         }
         const factor = distance / Math.max(1, pinchStart.current.distance);
-        next = { ...transformRef.current, scale: Math.max(0.03, Math.min(3, pinchStart.current.scale * factor)) };
+        const scale = Math.max(0.008, Math.min(3, pinchStart.current.scale * factor));
+        next = clampTransform({
+          scale,
+          x: midpoint.x - pinchStart.current.worldX * scale,
+          y: midpoint.y - pinchStart.current.worldY * scale
+        });
       } else if (touches.length === 1) {
         pinchStart.current = null;
         next.x = start.transform.x + (touches[0].pageX - start.x);
         next.y = start.transform.y + (touches[0].pageY - start.y);
+        next = clampTransform(next);
       }
 
       transformRef.current = next;
@@ -571,6 +649,12 @@ function touchDistance(touches) {
   const a = touches[0];
   const b = touches[1];
   return Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY);
+}
+
+function touchMidpoint(touches) {
+  const a = touches[0];
+  const b = touches[1];
+  return { x: (a.pageX + b.pageX) / 2, y: (a.pageY + b.pageY) / 2 };
 }
 
 const styles = StyleSheet.create({
