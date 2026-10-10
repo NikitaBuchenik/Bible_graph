@@ -163,14 +163,19 @@ export default function App() {
     setSearchMode(true);
     setSearchRefs(new Set(refs));
     setFocusRequest({ refs, sequence: ++focusSequence.current });
-    // Подсвечиваем найденные стихи и их непосредственных соседей,
-    // чтобы было видно все прямые связи каждого результата.
+    // Подсвечиваем только найденные стихи и вершины, до которых можно
+    // дойти по направленным связям от результатов поиска.
     const ids = new Set(refs);
-    for (const ref of refs) {
-      for (const next of adjacency.get(ref) ?? []) ids.add(next);
-    }
-    for (const link of graph?.links ?? []) {
-      if (refSet.has(link.target)) ids.add(link.source);
+    const queue = [...refs];
+    let head = 0;
+    while (head < queue.length) {
+      const current = queue[head++];
+      for (const next of adjacency.get(current) ?? []) {
+        if (!ids.has(next)) {
+          ids.add(next);
+          queue.push(next);
+        }
+      }
     }
     setHighlighted(ids);
   };
@@ -359,7 +364,7 @@ function GraphView({ graph, selectedRef, highlighted, searchMode, searchRefs, fo
       const b = nodeMap.get(link.target);
       if (!a || !b) continue;
       const isHighlighted = searchMode
-        ? searchRefs.has(link.source) || searchRefs.has(link.target)
+        ? highlighted.has(link.source) && highlighted.has(link.target)
         : selectedRef && highlighted.has(link.source) && highlighted.has(link.target);
       const path = isHighlighted ? highlightedLinksPath : linksPath;
       path.moveTo(a.x, a.y);
