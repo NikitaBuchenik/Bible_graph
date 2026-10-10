@@ -95,13 +95,15 @@ function buildPositions(rawNodes: GraphNode[], rawLinks: GraphLink[]): Positione
   const center = rawNodes.find(n => n.id === CENTER);
   if (center) positioned.push({ ...center, x: 0, y: 0, layer: 0 });
 
-  const radiusStep = 500;
+  // Keep successive graph layers visually compact; large radii made the
+  // outer layers effectively unreachable on a phone.
+  const radiusStep = 180;
   const sorted = [...groups.keys()].filter(x => x !== 0).sort((a, b) => a - b);
 
   for (const layer of sorted) {
     const group = groups.get(layer)!;
     let radius = layer === -1
-      ? radiusStep * (maxLayer + 5)
+      ? radiusStep * (Math.min(maxLayer, 12) + 5)
       : radiusStep * (layer + 1);
 
     const minDist = layer === -1 ? 150 : 80;
