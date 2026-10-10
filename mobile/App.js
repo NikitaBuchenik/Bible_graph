@@ -140,7 +140,7 @@ export default function App() {
     }
 
     setSelectedRef(ref);
-    setFocusRequest({ refs: [ref], sequence: ++focusSequence.current });
+    // Автопереход камерой выполняется только после явного запуска поиска.
     setSearchRefs(new Set());
     setDepth(1);
     const ids = new Set([ref]);
@@ -156,7 +156,6 @@ export default function App() {
       setHighlighted(new Set());
       return;
     }
-    const refSet = new Set(refs);
     clickState.current = { ref: null, count: 0 };
     setSelectedRef(null);
     setDepth(0);
@@ -244,7 +243,7 @@ export default function App() {
         <Pressable style={styles.searchButton} onPress={runSearch}>
           <Text style={styles.searchButtonText}>Поиск</Text>
         </Pressable>
-        {searchResults.length > 0 && (
+        {!searchMode && searchResults.length > 0 && (
           <View style={styles.results}>
             {searchResults.slice(0, 20).map(v => (
               <Pressable
